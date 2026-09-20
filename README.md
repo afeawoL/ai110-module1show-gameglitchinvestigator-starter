@@ -26,27 +26,35 @@ It wrote the code, ran away, and now the game is unplayable.
 ## 📝 Document Your Experience
 
 - [ ] Describe the game's purpose.
+   A number guessing game built with Streamlit. The app picks a secret number inside a range set by the difficulty (Easy 1–20, Normal 1–100, Hard 1–200), and you guess until you find it or run out of attempts. After each guess it tells you whether you were too high or too low, and awards points based on how few attempts it took.
+
 - [ ] Detail which bugs you found.
+   The directional hints were reversed, so every "too high" guess told you to go higher; the secret was cast to a string on every even-numbered attempt, which made 50 == "50" false and meant a correct guess literally could not win; and the New Game button reset only the attempt counter and the secret, leaving the game's status as "won" or "lost" so the round stayed over and the difficulty settings were inverted.
+
 - [ ] Explain what fixes you applied.
+   Refactored the four pure functions — check_guess, parse_guess, get_range_for_difficulty, and update_score — out of app.py into logic_utils.py. 
+   Fixed each bug at its source: swapped the hint directions, removed the str() cast and deleted the dead string-comparison fallback it was feeding, corrected the scoring arithmetic, rejected decimals and out-of-range guesses, and widened Hard's range so difficulty actually scales.
 
 ## 📸 Demo Walkthrough
 
 Describe your fixed game in numbered steps so a reader can follow along without watching a video:
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+1. User enters a guess of 90
+2. Game returns "Too Low"
+3. User enters a guess of 99 → "Too High"
+4. User enters a guess of 95 → "Win"
+5. Game ends after the correct guess
 
-**Screenshot** *(optional)*: <!-- Insert a screenshot of your fixed, winning game here -->
+**Screenshot** *(optional)*: <!-- Insert a screenshot of your fixed, winning game here -->![Finished Game](image.png)
 
 ## 🧪 Test Results
 
 ```
-# Paste your pytest output here, e.g.:
-# pytest tests/
-# ========================= X passed in 0.XXs =========================
+collected 28 items                                                                  
+
+tests/test_game_logic.py ............................                                                                                                                                                                                                [100%]
+
+============================= 28 passed in 0.02s ====================================
 ```
 
 ## 🚀 Stretch Features
