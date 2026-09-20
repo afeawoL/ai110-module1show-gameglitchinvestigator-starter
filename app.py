@@ -1,68 +1,14 @@
 import random
 import streamlit as st
 
-def get_range_for_difficulty(difficulty: str):
-    if difficulty == "Easy":
-        return 1, 20
-    if difficulty == "Normal":
-        return 1, 100
-    if difficulty == "Hard":
-        return 1, 50
-    return 1, 100
-
-
-def parse_guess(raw: str):
-    if raw is None:
-        return False, None, "Enter a guess."
-
-    if raw == "":
-        return False, None, "Enter a guess."
-
-    try:
-        if "." in raw:
-            value = int(float(raw))
-        else:
-            value = int(raw)
-    except Exception:
-        return False, None, "That is not a number."
-
-    return True, value, None
-
-
-def check_guess(guess, secret):
-    if guess == secret:
-        return "Win", "🎉 Correct!"
-
-    try:
-        if guess > secret:
-            return "Too High", "📈 Go HIGHER!"
-        else:
-            return "Too Low", "📉 Go LOWER!"
-    except TypeError:
-        g = str(guess)
-        if g == secret:
-            return "Win", "🎉 Correct!"
-        if g > secret:
-            return "Too High", "📈 Go HIGHER!"
-        return "Too Low", "📉 Go LOWER!"
-
-
-def update_score(current_score: int, outcome: str, attempt_number: int):
-    if outcome == "Win":
-        points = 100 - 10 * (attempt_number + 1)
-        if points < 10:
-            points = 10
-        return current_score + points
-
-    if outcome == "Too High":
-        if attempt_number % 2 == 0:
-            return current_score + 5
-        return current_score - 5
-
-    if outcome == "Too Low":
-        return current_score - 5
-
-    return current_score
+# FIX: Refactored the four pure game functions into logic_utils.py using agent
+# mode, so app.py is now only the Streamlit UI and the submit handler.
+from logic_utils import (
+    check_guess,
+    get_range_for_difficulty,
+    parse_guess,
+    update_score,
+)
 
 st.set_page_config(page_title="Glitchy Guesser", page_icon="🎮")
 
@@ -77,10 +23,13 @@ difficulty = st.sidebar.selectbox(
     index=1,
 )
 
+# FIX: Inverted attempt limits. Easy used to get 6 guesses while Normal got 8,
+# making "Easy" the stingiest setting. More attempts means an easier game, so
+# the limits no longer increase with difficulty.
 attempt_limit_map = {
-    "Easy": 6,
+    "Easy": 10,
     "Normal": 8,
-    "Hard": 5,
+    "Hard": 8,
 }
 attempt_limit = attempt_limit_map[difficulty]
 
@@ -89,27 +38,48 @@ low, high = get_range_for_difficulty(difficulty)
 st.sidebar.caption(f"Range: {low} to {high}")
 st.sidebar.caption(f"Attempts allowed: {attempt_limit}")
 
-if "secret" not in st.session_state:
+
+# FIX: Round state was reset ad hoc in three different places and never
+# completely. One helper now owns it, so every reset is identical.
+def start_new_round():
+    """Reset every piece of round state, using the current difficulty's range."""
+    # FIX: Uses low/high instead of a hardcoded randint(1, 100), which used to
+    # put the secret outside the visible range on Easy and Hard.
     st.session_state.secret = random.randint(low, high)
-
-if "attempts" not in st.session_state:
-    st.session_state.attempts = 1
-
-if "score" not in st.session_state:
+    # FIX: attempts started at 1 before a single guess was made, so the limit
+    # check ended the game one guess early.
+    st.session_state.attempts = 0
+    # FIX: score, status and history were never reset, so a finished game
+    # stayed finished and the old score carried over.
     st.session_state.score = 0
-
-if "status" not in st.session_state:
     st.session_state.status = "playing"
-
-if "history" not in st.session_state:
     st.session_state.history = []
+
+
+# FIX: The secret used to be generated ONCE on first load and never again, so
+# switching Normal -> Easy left a secret outside 1-20 and the round could not
+# be won. A difficulty change now starts a fresh round.
+if "secret" not in st.session_state or st.session_state.get("difficulty") != difficulty:
+    st.session_state.difficulty = difficulty
+    start_new_round()
 
 st.subheader("Make a guess")
 
-st.info(
-    f"Guess a number between 1 and 100. "
-    f"Attempts left: {attempt_limit - st.session_state.attempts}"
-)
+# FIX: The banner used to render ABOVE the submit handler that increments
+# attempts, so "Attempts left" was stale by one for the whole session. A
+# placeholder lets it keep its position but be filled in after the handler runs.
+status_placeholder = st.empty()
+
+
+def render_status_banner():
+    attempts_left = max(attempt_limit - st.session_state.attempts, 0)
+    # FIX: Was hardcoded to "between 1 and 100", which lied to the player on
+    # Easy and Hard. Uses the actual low/high now.
+    status_placeholder.info(
+        f"Guess a number between {low} and {high}. "
+        f"Attempts left: {attempts_left}"
+    )
+
 
 with st.expander("Developer Debug Info"):
     st.write("Secret:", st.session_state.secret)
@@ -131,9 +101,11 @@ with col2:
 with col3:
     show_hint = st.checkbox("Show hint", value=True)
 
+# FIX: "New Game" did not start a new game. It reset only attempts and the
+# secret, leaving status "won"/"lost" so the st.stop() below still fired and the
+# game stayed over. It now resets the full round.
 if new_game:
-    st.session_state.attempts = 0
-    st.session_state.secret = random.randint(1, 100)
+    start_new_round()
     st.success("New game started.")
     st.rerun()
 
@@ -142,28 +114,36 @@ if st.session_state.status != "playing":
         st.success("You already won. Start a new game to play again.")
     else:
         st.error("Game over. Start a new game to try again.")
+    render_status_banner()
     st.stop()
 
 if submit:
-    st.session_state.attempts += 1
-
-    ok, guess_int, err = parse_guess(raw_guess)
+    # FIX: The attempt used to be spent BEFORE the input was validated, so
+    # submitting an empty box or "abc" burned a guess. Validation comes first.
+    ok, guess_int, err = parse_guess(raw_guess, low, high)
 
     if not ok:
-        st.session_state.history.append(raw_guess)
+        # FIX: Rejected input was appended to history, mixing raw strings in
+        # with the int guesses. Invalid input now costs nothing at all.
         st.error(err)
     else:
+        st.session_state.attempts += 1
         st.session_state.history.append(guess_int)
 
-        if st.session_state.attempts % 2 == 0:
-            secret = str(st.session_state.secret)
-        else:
-            secret = st.session_state.secret
+        # FIX: The unwinnable-game bug. On every even attempt the secret was
+        # cast to str before this call: 50 == "50" is False, so a correct guess
+        # could not win, and 50 > "50" raised TypeError into check_guess's
+        # broken string fallback. The secret is now always passed as an int.
+        outcome, message = check_guess(guess_int, st.session_state.secret)
 
-        outcome, message = check_guess(guess_int, secret)
-
-        if show_hint:
-            st.warning(message)
+        if outcome != "Win":
+            # FIX: Unchecking "Show hint" suppressed ALL feedback, so a wrong
+            # guess produced no response at all. It now only hides the
+            # directional part -- the player is always told the guess was wrong.
+            if show_hint:
+                st.warning(message)
+            else:
+                st.warning("Not quite. Try again.")
 
         st.session_state.score = update_score(
             current_score=st.session_state.score,
@@ -186,6 +166,8 @@ if submit:
                     f"The secret was {st.session_state.secret}. "
                     f"Score: {st.session_state.score}"
                 )
+
+render_status_banner()
 
 st.divider()
 st.caption("Built by an AI that claims this code is production-ready.")
